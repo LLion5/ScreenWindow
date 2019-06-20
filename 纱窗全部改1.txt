@@ -1,0 +1,829 @@
+/*********************************************************************************
+pm传感器  pin3（ledPower） 外面2根接5V ，其余2根接地
+单片机   p16（ledPower）   p26--sda，p27--scl
+**********************************************************************************/
+#include <reg52.h>
+#include <stdio.h>
+#include <intrins.h>
+
+#define MAIN_Fosc		11059200UL	//宏定义主时钟HZ
+#define PCF8591_ADDR	0x90		//PCF8591地址
+
+
+#define LCD1602_DB P0	//LCD1602数据总线
+
+/*====================================
+ 自定义类型名
+====================================*/
+typedef unsigned char INT8U;
+typedef unsigned char uchar;
+
+typedef unsigned int INT16U;
+typedef unsigned int uint;
+
+uchar AD_Value,Value=123;	//存储AD转换回的数字量
+uchar qian,bai,shi,ge;  //PM2.5的各位数字
+uchar TestStr[] = {"HU=  % L  % H  %"};//1602初始化显示，可以自己修改
+uchar PM25[] =    {"PM=    L    H   "};
+
+/*====================================
+ 硬件接口位声明
+====================================*/
+sbit SDA = P2^6;   //I2C串行数据
+sbit SCL = P2^7;   //I2C串行时钟
+sbit ledPower=P1^6;
+
+sbit LCD1602_RS = P3^5;	 //RS端
+sbit LCD1602_RW = P3^6;	 //RW端
+sbit LCD1602_EN = P3^4;	 //EN端
+
+
+//管脚声明
+sbit LED_pm = P2^3;		//pm上限值操作端口,报警灯吸合继电器;
+sbit LED_pm_L = P2^2;		//pm下限报警灯
+sbit LED_humi = P2^1;		//湿度上限报警灯
+sbit LED_humi_L	= P2^0;		//湿度下限报警灯
+//sbit baojing			= P3^2;		//蜂鸣器接口
+//按键
+
+sbit Key1=P1^0;				 //设置键
+sbit Key2=P1^1;				 //加按键
+sbit Key3=P1^2;				 //减按键
+
+sbit DHT11_IN=P1^3;				 //DHT11_IN	 纱窗内侧传感器
+//sbit DHT11_IN_OUT=P1^4;			 //DHT11_IN_OUT 纱窗外侧传感器(没有安装)
+
+//按钮模式|  
+uchar Mode=0;				 
+uchar  U8T_data_H,U8T_data_L,U8RH_data_H,U8RH_data_L,U8checkdata;//最终保留的温湿度值
+uchar  U8FLAG,U8comdata;
+uchar  U8count,U8temp;
+uchar  U8T_data_H_temp,U8T_data_L_temp,U8RH_data_H_temp,U8RH_data_L_temp,U8checkdata_temp;//com函数接收温湿度传感器变量
+
+//预设值
+uchar temp;					 //用于读取ADC数据
+uchar yushe_pm=60;		 //pm预设值
+uchar yushe_humi=80;		 //湿度预设值
+
+uchar yushe_pm_L=15;		 //pm预设值
+uchar yushe_humi_L=10;		 //湿度预设值
+
+
+/*=================================================
+*函数名称：Read_Busy
+*函数功能：判断1602液晶忙，并等待
+=================================================*/
+void Read_Busy()
+{
+	uchar busy;
+	LCD1602_DB = 0xff;//复位数据总线
+	LCD1602_RS = 0;	  //拉低RS
+	LCD1602_RW = 1;	  //拉高RW读
+	do
+	{
+		LCD1602_EN = 1;//使能EN
+		busy = LCD1602_DB;//读回数据
+		LCD1602_EN = 0;	 //拉低使能以便于下一次产生上升沿
+	}while(busy & 0x80); //判断状态字BIT7位是否为1，为1则表示忙，程序等待
+}
+/*=================================================
+*函数名称：LCD1602_Write_Cmd
+*函数功能：写LCD1602命令
+*调用：Read_Busy();
+*输入：cmd:要写的命令
+=================================================*/
+void LCD1602_Write_Cmd(uchar cmd)
+{
+	Read_Busy();	 //判断忙，忙则等待
+	LCD1602_RS = 0;
+	LCD1602_RW = 0;	//拉低RS、RW操作时序情况1602课件下中文使用说明基本操作时序章节
+	LCD1602_DB = cmd;//写入命令
+	LCD1602_EN = 1;	 //拉高使能端 数据被传输到LCD1602内
+	LCD1602_EN = 0;	 //拉低使能以便于下一次产生上升沿
+}
+/*=================================================
+*函数名称：LCD1602_Write_Dat
+*函数功能：写LCD1602数据
+*调用：Read_Busy();
+*输入：dat：需要写入的数据
+=================================================*/
+void LCD1602_Write_Dat(uchar dat)
+{
+	Read_Busy();
+	LCD1602_RS = 1;
+	LCD1602_RW = 0;
+	LCD1602_DB = dat;
+	LCD1602_EN = 1;
+	LCD1602_EN = 0;
+}
+/*=================================================
+*函数名称：LCD1602_Dis_OneChar
+*函数功能：在指定位置显示一个字符
+*调用：LCD1602_Write_Cmd(); LCD1602_Write_Dat();	
+*输入：x：要显示的横坐标取值0-40，y：要显示的行坐标取值0-1（0为第一行,1为第二行）
+		dat：需要显示的数据以ASCLL形式显示
+=================================================*/
+void LCD1602_Dis_OneChar(uchar x, uchar y,uchar dat)
+{
+	if(y)	x |= 0x40;
+	x |= 0x80;
+	LCD1602_Write_Cmd(x);
+	LCD1602_Write_Dat(dat);		
+}
+/*=================================================
+*函数名称：LCD1602_Dis_Str
+*函数功能：在指定位置显示字符串
+*调用：LCD1602_Write_Cmd(); LCD1602_Write_Dat();
+*输入：x：要显示的横坐标取值0-40，y：要显示的行坐标取值0-1（0为第一行,1为第二行）
+		*str：需要显示的字符串
+=================================================*/
+void LCD1602_Dis_Str(uchar x, uchar y, uchar *str)
+{
+	if(y) x |= 0x40;
+	x |= 0x80;
+	LCD1602_Write_Cmd(x);
+	while(*str != '\0')
+	{
+		LCD1602_Write_Dat(*str++);
+	}
+}
+/*=================================================
+*函数名称：Init_LCD1602
+*函数功能：1602初始化
+*调用：	LCD1602_Write_Cmd();
+=================================================*/
+void Init_LCD1602()
+{
+	LCD1602_Write_Cmd(0x38); //	设置16*2显示，5*7点阵，8位数据接口
+	LCD1602_Write_Cmd(0x0c); //开显示
+	LCD1602_Write_Cmd(0x06); //读写一字节后地址指针加1
+	LCD1602_Write_Cmd(0x01); //清除显示
+}
+
+
+
+
+
+
+////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+/*====================================
+函数：void Delay_Ms(INT16U ms)
+参数：ms，毫秒延时形参
+描述：12T 51单片机自适应主时钟毫秒级延时函数
+====================================*/
+void Delay_Ms(INT16U ms)
+{
+     INT16U i;
+	 do{
+	      i = MAIN_Fosc / 96000; 
+		  while(--i);   //96T per loop
+     }while(--ms);
+}
+
+
+/*====================================
+函数：void Delay5us()
+描述：12T 51单片机5微秒延时函数自适应时钟（11.0592M，12M,22.1184M）
+====================================*/
+void Delay5us()
+{
+	#if MAIN_Fosc == 11059200
+		_nop_();
+	#elif MAIN_Fosc == 12000000
+		_nop_();
+	#elif MAIN_Fosc == 22118400
+		_nop_(); _nop_(); _nop_();
+	#endif
+}
+
+void Delay40us()
+{
+	#if MAIN_Fosc == 11059200
+		_nop_();_nop_(); _nop_(); _nop_();_nop_(); _nop_(); _nop_();_nop_();
+	#elif MAIN_Fosc == 12000000
+		_nop_();
+	#elif MAIN_Fosc == 22118400
+		_nop_(); _nop_(); _nop_();
+	#endif
+}
+
+void Delay280us()
+{
+	INT16U i = 56;
+	while(i--)
+	{
+	  _nop_();
+	}
+}
+
+void Delay9680us()
+{
+	INT16U i = 1936;
+	while(i--)
+	{
+	  _nop_();
+	}
+}
+
+/*====================================
+函数：I2C_init()
+描述：I2C总线初始化
+====================================*/
+void I2C_init()
+{
+	SDA = 1;   //数据总线高
+	_nop_();
+	SCL = 1;   //时钟总线高
+	_nop_();
+}
+
+/*====================================
+函数：I2C_Start()
+描述：I2C起始信号
+====================================*/
+void I2C_Start()  
+{
+	SCL = 1;
+	_nop_();
+	SDA = 1;
+	Delay5us();
+	SDA = 0;
+	Delay5us();
+}
+
+/*====================================
+函数：I2C_Stop()
+描述：I2C停止信号
+====================================*/
+void I2C_Stop()
+{
+	SDA = 0;
+	_nop_();
+	SCL = 1;
+	Delay5us();
+	SDA = 1;
+	Delay5us();
+}
+
+/*====================================
+函数：Master_ACK(bit i)
+参数：i 为0时发送非应答 为1时发送应答
+描述：I2C主机发送应答
+====================================*/
+void Master_ACK(bit i)	
+{
+	SCL = 0; // 拉低时钟总线允许SDA数据总线上的数据变化
+	_nop_(); // 让总线稳定
+	if (i)	 //如果i = 1 那么拉低数据总线 表示主机应答
+	{
+		SDA = 0;
+	}
+	else	 
+	{
+		SDA = 1;	 //发送非应答
+	}
+	_nop_();//让总线稳定
+	SCL = 1;//拉高时钟总线 让从机从SDA线上读走 主机的应答信号
+	_nop_();
+	SCL = 0;//拉低时钟总线， 占用总线继续通信
+	_nop_();
+	SDA = 1;//释放SDA数据总线。
+	_nop_();
+}
+
+/*====================================
+函数：Test_ACK()
+返回：0为非应答 1为应答
+描述：I2C检测从机应答
+====================================*/
+bit Test_ACK()	 // 检测从机应答
+{
+	SCL = 1;//时钟总线为高电平期间可以读取从机应答信号
+	Delay5us();
+	if (SDA)
+	{
+		SCL = 0;
+		I2C_Stop();
+		return(0);
+	}
+	else
+	{
+		SCL = 0;
+		return(1);
+	}
+}
+
+/*====================================
+函数：I2C_send_byte(uchar byte)
+参数：byte 要发送的字节
+描述：I2C发送一个字节
+====================================*/
+void I2C_send_byte(uchar byte)
+{
+	uchar i;
+	for(i = 0 ; i < 8 ; i++)
+	{
+		SCL = 0;
+		_nop_();
+		if (byte & 0x80)	//
+		{
+			SDA = 1;
+			_nop_();
+		}
+		else
+		{
+			SDA = 0;
+			_nop_();
+		}
+		SCL = 1;
+		_nop_();
+		byte <<= 1;
+	}
+	SCL = 0;
+	_nop_();
+	SDA = 1;
+	_nop_();	
+}
+
+/*====================================
+函数：I2C_read_byte()
+返回：读取的字节
+描述：I2C读一个字节
+====================================*/
+uchar I2C_read_byte()
+{
+	uchar i, dat;
+	SCL = 0 ;
+	_nop_();
+	SDA = 1;
+	_nop_();
+	for(i = 0 ; i < 8 ; i++)
+	{
+		SCL = 1;
+		_nop_();
+		dat <<= 1;	  
+		if (SDA)
+		{
+			dat |= 0x01;  
+		}
+		_nop_();
+		SCL = 0;
+		_nop_();
+	}
+	return(dat);
+}
+
+/*读AD数据*/
+bit ADC_Read(uchar CON)
+{
+	I2C_Start();
+	I2C_send_byte(PCF8591_ADDR+0);
+	if (!Test_ACK())
+	{
+		return(0);
+	}
+	I2C_send_byte(CON);
+	Master_ACK(0);
+	I2C_Start();
+	I2C_send_byte(PCF8591_ADDR+1);
+	if (!Test_ACK())
+	{
+		return(0);
+	}
+	AD_Value = I2C_read_byte();
+	Master_ACK(0);
+	I2C_Stop();
+	return(1);	
+}
+
+
+
+
+///////////////////////////////////////////////////////////////////////
+
+//软件延时函数
+void delay(uint z)		  //延时函数大约延时z ms
+{
+	uint i,j;
+	for(i=0;i<z;i++)
+	for(j=0;j<121;j++);
+}
+
+void Delay1(uint j)
+{  
+	uchar i;
+	for(;j>0;j--)
+	{ 	
+		for(i=0;i<27;i++);
+	}
+}
+
+void  Delay_10us(void)
+{
+	uchar i;
+	i--;
+	i--;
+	i--;
+	i--;
+	i--;
+	i--;
+}
+
+void Display_1602(yushe_pm,yushe_humi,yushe_pm_L,yushe_humi_L,shidu,pm)
+{
+	//设置最高湿度值
+	LCD1602_Write_Cmd(0x80+13);
+	LCD1602_Write_Dat(0x30+yushe_humi/10);
+	LCD1602_Write_Dat(0x30+yushe_humi%10);
+	//设置最低湿度值
+	LCD1602_Write_Cmd(0x80+8);
+	LCD1602_Write_Dat(0x30+yushe_humi_L/10);
+	LCD1602_Write_Dat(0x30+yushe_humi_L%10);
+
+	//设置最高pm值
+	LCD1602_Write_Cmd(0x80+0x40+13);
+	LCD1602_Write_Dat(0x30+yushe_pm%100/10);
+	LCD1602_Write_Dat(0x30+yushe_pm%10);
+	//设置最低pm值
+	LCD1602_Write_Cmd(0x80+0x40+8);
+	LCD1602_Write_Dat(0x30+yushe_pm_L%100/10);
+	LCD1602_Write_Dat(0x30+yushe_pm_L%10);
+	//时时湿度
+	LCD1602_Write_Cmd(0x80+3);
+	LCD1602_Write_Dat(0x30+shidu%100/10);
+	LCD1602_Write_Dat(0x30+shidu%10);
+	//时时pm值
+	LCD1602_Write_Cmd(0x80+0x40+3);
+	LCD1602_Write_Dat(0x30+pm/100);
+	LCD1602_Write_Dat(0x30+pm%100/10);
+	LCD1602_Write_Dat(0x30+pm%10);
+}
+
+
+//按键处理函数
+void Key()
+{
+	//模式选择
+	if(Key1==0)	  //设置按键
+	{
+		while(Key1==0); //按一下key1开始设置
+		if(Mode>=5) Mode=0;
+		else
+		{
+			Mode++;			//模式加一
+			switch(Mode)	//判断模式的值
+			{
+				case 1://调温度上限值模式
+				{
+					LCD1602_Write_Cmd(0x80+12);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('-');
+					LCD1602_Write_Cmd(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+7);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					LCD1602_Write_Cmd(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					break;			  //执行后跳出switch
+				}
+				case 2://调湿度上限值模式
+				{
+					LCD1602_Write_Cmd(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('-');
+					LCD1602_Write_Cmd(0x80+12);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+7);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					LCD1602_Write_Cmd(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					break;
+				}
+				case 3://调温度下限值模式
+				{
+					LCD1602_Write_Cmd(0x80+7);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('-');
+					LCD1602_Write_Cmd(0x80+12);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					break;			  //执行后跳出switch
+				}
+				case 4://调湿度下限值模式
+				{
+					LCD1602_Write_Cmd(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('-');
+					LCD1602_Write_Cmd(0x80+12);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+7);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					break;
+				}
+				case 5:					//当模式加到3时
+				{
+					LCD1602_Write_Cmd(0x38);//屏幕初始化
+					LCD1602_Write_Cmd(0x0c);//打开显示 无光标 无光标闪烁
+					LCD1602_Write_Cmd(0x80+12);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('H');
+					LCD1602_Write_Cmd(0x80+7);//为1时 温度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					LCD1602_Write_Cmd(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+					LCD1602_Write_Dat('L');
+					Mode=0;			//模式清零
+					break;
+				}
+			}
+		}
+	}
+	if(Key2==0&&Mode!=0)	 //加按键只有在模式不等于0时有效
+	{
+		while(Key2==0);
+		switch(Mode)		 //加按键按下时 判断当前模式
+		{
+			case 1:			 //模式为1时
+			{
+				yushe_pm++;				//预设温度上限值（阀值）加1
+				if(yushe_pm>=99)		    //加到大于等于99时
+				yushe_pm=99;	 					//固定为99
+				LCD1602_Write_Cmd(0x80+13);			//选1602上显示的位置
+				LCD1602_Write_Dat(0x30+yushe_pm/10); 	//将温度上限值数据分解开送入液晶显示
+				LCD1602_Write_Dat(0x30+yushe_pm%10);
+				break;
+			}
+			case 2:
+			{
+				yushe_humi++;				//湿度上限值,同温度上限值设置
+				if(yushe_humi>=100)
+				yushe_humi=100;
+				LCD1602_Write_Cmd(0x80+0x40+13);
+				LCD1602_Write_Dat(0x30+yushe_humi%100/10);
+				LCD1602_Write_Dat(0x30+yushe_humi%10);
+				break;				
+			}
+			case 3:			 //模式为3时
+			{
+				yushe_pm_L++;		//温度下限值,同温度上限值设置
+				if(yushe_pm_L>=95)				 				
+				yushe_pm_L=95;					 					
+				LCD1602_Write_Cmd(0x80+8);				 				
+				LCD1602_Write_Dat(0x30+yushe_pm_L/10); 
+				LCD1602_Write_Dat(0x30+yushe_pm_L%10);
+				break;
+			}
+			case 4:
+			{
+				yushe_humi_L++;		//湿度下限值,同温度上限值设置
+				if(yushe_humi_L>=90)				 				
+				yushe_humi_L=90;					 					
+				LCD1602_Write_Cmd(0x80+0x40+8);
+				LCD1602_Write_Dat(0x30+yushe_humi_L%100/10);
+				LCD1602_Write_Dat(0x30+yushe_humi_L%10);
+				break;				
+			}
+		}
+	}
+	if(Key3==0&&Mode!=0)
+	{
+		while(Key3==0);
+		switch(Mode)
+		{
+			case 1:
+			{
+				if(yushe_pm<=1)			//当温度上限值减小到1时
+				yushe_pm=1;                        //固定为1
+				yushe_pm--;				            //预设温度值减一
+				LCD1602_Write_Cmd(0x80+13);						//选1602上显示的位置
+				LCD1602_Write_Dat(0x30+yushe_pm/10);     	//将温度上限值数据分解开送入液晶显示
+				LCD1602_Write_Dat(0x30+yushe_pm%10);
+				break;
+			}
+			case 2:
+			{
+				if(yushe_humi<=1)			//湿度上限值,同温度上限值设置
+				yushe_humi=1;
+				yushe_humi--;							  
+				LCD1602_Write_Cmd(0x80+0x40+13);
+				LCD1602_Write_Dat(0x30+yushe_humi%100/10);
+				LCD1602_Write_Dat(0x30+yushe_humi%10);
+				break;				
+			}
+			case 3:			 //模式为3时
+			{
+				if(yushe_pm_L<=1)		//温度下限值,同温度上限值设置
+				yushe_pm_L=1;					 				
+				yushe_pm_L--;					 				
+				LCD1602_Write_Cmd(0x80+8);				 				
+				LCD1602_Write_Dat(0x30+yushe_pm_L/10);
+				LCD1602_Write_Dat(0x30+yushe_pm_L%10);
+				break;
+			}
+			case 4:
+			{
+				if(yushe_humi_L<=1)			//湿度下限值,同温度上限值设置
+				yushe_humi_L=1;					 					
+				yushe_humi_L--;					 					
+				LCD1602_Write_Cmd(0x80+0x40+8);
+				LCD1602_Write_Dat(0x30+yushe_humi_L%100/10);
+				LCD1602_Write_Dat(0x30+yushe_humi_L%10);
+				break;				
+			}		}
+	}
+	delay(10);					 //延时去抖动
+	LCD1602_Write_Cmd(0x38);//屏幕初始化
+	LCD1602_Write_Cmd(0x0c);//打开显示 无光标 无光标闪烁
+}
+
+
+void  COM(void)
+{
+	uchar i;
+	for(i=0;i<8;i++)	   
+	{
+		U8FLAG=2;	
+		while((!DHT11_IN)&&U8FLAG++);
+		Delay_10us();
+		Delay_10us();
+		Delay_10us();
+		U8temp=0;
+		if(DHT11_IN)U8temp=1;
+		U8FLAG=2;
+		while((DHT11_IN)&&U8FLAG++);
+		//超时则跳出for循环		  
+		if(U8FLAG==1)break;
+		//判断数据位是0还是1	 
+		// 如果高电平高过预定0高电平值则数据位为 1 
+		U8comdata<<=1;
+		U8comdata|=U8temp;        //
+	}
+}
+//--------------------------------
+//-----湿度读取子程序 ------------
+//--------------------------------
+//----以下变量均为全局变量--------
+//----温度高8位== U8T_data_H------
+//----温度低8位== U8T_data_L------
+//----湿度高8位== U8HU_data_H-----
+//----湿度低8位== U8HU_data_L-----
+//----校验 8位 == U8checkdata-----
+//----调用相关子程序如下----------
+//---- Delay();, Delay_10us();,COM(); 
+//--------------------------------
+
+
+void RH(void)
+{
+	//主机拉低18ms 
+	DHT11_IN=0;
+	Delay1(180);
+	ET0 = 0;//关闭定时器0中断
+	DHT11_IN=1;
+	//总线由上拉电阻拉高 主机延时20us
+	Delay_10us();
+	Delay_10us();
+	Delay_10us();
+	Delay_10us();
+	//主机设为输入 判断从机响应信号 
+	DHT11_IN=1;
+	//判断从机是否有低电平响应信号 如不响应则跳出，响应则向下运行	  
+	if(!DHT11_IN)		 //T !	  
+	{
+		U8FLAG=2;
+		//判断从机是否发出 80us 的低电平响应信号是否结束	 
+		while((!DHT11_IN)&&U8FLAG++);
+		U8FLAG=2;
+		//判断从机是否发出 80us 的高电平，如发出则进入数据接收状态
+		while((DHT11_IN)&&U8FLAG++);
+		//数据接收状态		 
+		COM();
+		U8RH_data_H_temp=U8comdata;
+		COM();
+		U8RH_data_L_temp=U8comdata;
+		COM();
+		U8T_data_H_temp=U8comdata;
+		COM();
+		U8T_data_L_temp=U8comdata;
+		COM();
+		U8checkdata_temp=U8comdata;
+		DHT11_IN=1;
+		ET0 = 1;//开启定时器0中断
+		//数据校验 
+
+		U8temp=(U8T_data_H_temp+U8T_data_L_temp+U8RH_data_H_temp+U8RH_data_L_temp);
+		if(U8temp==U8checkdata_temp)
+		{
+			U8RH_data_H=U8RH_data_H_temp;
+			U8RH_data_L=U8RH_data_L_temp;
+			U8T_data_H=U8T_data_H_temp;
+			U8T_data_L=U8T_data_L_temp;
+			U8checkdata=U8checkdata_temp;
+		}//fi
+	}//fi
+
+}
+	
+
+//用于处理内外接收到的湿度值；	
+/*void CompileHu(){
+	ReadHu(DHT11_IN);
+	U8HU_data_H_comp=U8HU_data_H;
+	U8HU_data_L_comp=U8HU_data_L;
+	U8T_data_H_comp=U8T_data_H;
+	U8T_data_L_comp=U8T_data_L;
+	U8checkdata_comp=U8checkdata;
+	ReadHu(DHT11_IN_OUT);
+	U8HU_data_H_comp=U8HU_data_H*0.6+U8HU_data_H_comp*0.4;
+	U8HU_data_L_comp=U8HU_data_L*0.6+U8HU_data_L_comp*0.4;
+	U8T_data_H=U8T_data_H*0.6+U8T_data_H_comp*0.4;
+	U8T_data_L=U8T_data_L*0.6+U8T_data_L_comp*0.4;
+	U8checkdata_comp=U8checkdata;
+
+}		*/
+
+
+
+void main()
+{
+	uint i=0;
+	Value=123;//默认初值
+	Delay_Ms(100);       //上电延时100ms,等待DHT11_IN启动
+
+	Init_LCD1602();//1602初始化
+	LCD1602_Dis_Str(0, 0, &TestStr[0]);	//显示字符串
+	LCD1602_Dis_Str(0, 1, &PM25[0]);	//显示字符串
+	
+	I2C_init();  //i2c通信模拟初始
+	
+	while(1)
+	{
+		Key();			  		//调用按键函数  扫描按键
+		if(Mode==0)		  //只有当模式为0时才会执行以下的阀值判断部分
+		{
+			if(i<1)
+			{
+				i=10;
+				RH();//温湿度检测受定时器影响,故在驱动程序中关闭定时器中断,减小扫描频率才能更好的实现红外接收
+			}
+			i--;
+		
+		//Value=123;//PM2.5默认初值
+		ledPower=0;//打开红外发光管
+		Delay280us();//延时280us
+		//单端输入，读出通道3的值,(AD_Value)
+		ADC_Read(0x03);
+		Delay40us();//再延时40us
+		ledPower=1;//关闭红外发光管
+		Delay9680us();//最后延时9680us，完成一个周期10ms的脉冲驱动	
+
+		//           预设pm高   预设湿度   预设pm低  预设湿度低   实时湿度    pm值	
+		Display_1602(yushe_pm,yushe_humi,yushe_pm_L,yushe_humi_L,U8RH_data_H,AD_Value);//
+				
+			if(U8RH_data_H>=yushe_humi)	 //湿度值大于等于预设上限值时
+			{
+				LED_humi=0;		  	//湿度上限指示灯亮
+				//baojing=0;			  //蜂鸣器报警
+			}
+			else if(U8RH_data_H<=yushe_humi_L)	  //湿度值小于等于预设值下限值时
+			{
+				LED_humi_L=0;		  //湿度下限指示灯亮
+				//baojing=0;			  //蜂鸣器报警
+			}
+			else					  //湿度值处于上限界限之间时
+			{
+				LED_humi=1;		  	//关掉湿度上限报警灯
+				LED_humi_L=1;		  //关掉湿度下限报警灯
+			}
+			if(U8T_data_H>=(yushe_pm))	  //pm值大于等于预设上限值时
+			{
+				//baojing=0;			  //打开蜂鸣器报警
+				LED_pm=0;		  //打开pm上限报警灯
+			}
+			else if(U8T_data_H<=yushe_pm_L)	  //pm值小于等于预设值下限值时
+			{
+				LED_pm_L=0;		  //pm下限指示灯亮
+				//baojing=0;			  //蜂鸣器报警
+			}
+			else					  //pm值处于上限界限之间时
+			{
+				LED_pm=1;		  	//关闭pm上限报警灯
+				LED_pm_L=1;		  //关闭pm下限报警灯
+			}
+			if(yushe_humi_L<U8RH_data_H&&U8RH_data_H<yushe_humi);	  //当湿度处于正常值时 			
+		else
+		{
+			ET0 = 1;//不正常，则开启定时器0中断
+		}
+	}
+		
+		Delay_Ms(1000);//
+	}
+}

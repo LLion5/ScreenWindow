@@ -1,0 +1,566 @@
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 1   
+
+
+C51 COMPILER V9.59.0.0, COMPILATION OF MODULE NEW_SHACHUANG
+OBJECT MODULE PLACED IN new_shachuang.OBJ
+COMPILER INVOKED BY: D:\keil5\C51\BIN\C51.EXE new_shachuang.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          
+   2          //程序头函数
+   3          #include <reg52.h>
+   4          //显示函数
+   5          #include <intrins.h>                         
+   6          
+   7          //宏定义
+   8          #define uint unsigned int 
+   9          #define uchar unsigned char
+  10          
+  11          //管脚声明
+  12          sbit LED_wendu = P2^3;    //温度上限值操作端口,报警灯吸合继电器;
+  13          sbit LED_wendu_L = P2^2;    //温度下限报警灯
+  14          sbit LED_humi = P2^1;   //湿度上限报警灯
+  15          sbit LED_humi_L = P2^0;   //湿度下限报警灯
+  16          //sbit baojing      = P3^2;   //蜂鸣器接口
+  17          //按键
+  18          
+  19          sbit Key1=P1^0;        //设置键
+  20          sbit Key2=P1^1;        //加按键
+  21          sbit Key3=P1^2;        //减按键
+  22          
+  23          sbit DHT11_IN=P1^3;        //DHT11_IN  纱窗内侧传感器
+  24          sbit DHT11_OUT=P1^4;       //DHT11_OUT 纱窗外侧传感器
+  25          
+  26          signed char w;            //温度值全局变量
+  27          uint c;           //温度值全局变量
+  28          uchar temp;          //用于读取ADC数据
+  29          uchar yushe_wendu=60;    //温度预设值
+  30          uchar yushe_humi=88;     //湿度预设值
+  31          
+  32          uchar yushe_wendu_L=15;    //温度预设值
+  33          uchar yushe_humi_L=10;     //湿度预设值
+  34          //按钮模式|  
+  35          uchar Mode=0;        
+  36          //无temp表示最终量；
+  37          uchar  U8T_data_H,U8T_data_L,U8HU_data_H,U8HU_data_L,U8checkdata;
+  38          uchar  U8FLAG,U8comdata;
+  39          uchar  U8count,U8temp;
+  40          //temp后缀表示temporary，为临时变量；
+  41          uchar  U8T_data_H_temp,U8T_data_L_temp,U8HU_data_H_temp,U8HU_data_L_temp,U8checkdata_temp;
+  42          //comp后缀表示compile，作为数据整理时的临时变量；
+  43          uchar  U8T_data_H_comp,U8T_data_L_comp,U8HU_data_H_comp,U8HU_data_L_comp,U8checkdata_comp;
+  44          
+  45          //软件延时函数
+  46          void delay(uint z)      //延时函数大约延时z ms
+  47          {
+  48   1        uint i,j;
+  49   1        for(i=0;i<z;i++)
+  50   1        for(j=0;j<121;j++);
+  51   1      }
+  52          
+  53          void Delay_Ms(uint ms)
+  54          {
+  55   1        uint i,j;
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 2   
+
+  56   1        for(i=ms;i>0;i--)
+  57   1          for(j=112;j>0;j--);
+  58   1      }
+  59          
+  60          //LCD管脚声明 （RW引脚实物直接接地，因为本设计只用到液晶的写操作，RW引脚一直是低电平）
+  61          sbit LCDRS = P3^5;
+  62          sbit LCDEN = P3^4;
+  63          //初始化时显示的内容
+  64          uchar code Init1[]="PM=    L    H   ";
+  65          uchar code Init2[]="HU=  % L  % H  %";
+  66          //LCD延时
+  67          void LCDdelay(uint z)     //该延时大约100us
+  68          {
+  69   1        uint x,y;
+  70   1        for(x=z;x>0;x--)
+  71   1          for(y=10;y>0;y--);
+  72   1      }
+  73          
+  74          //写命令
+  75          void write_com(uchar com)
+  76          {
+  77   1        LCDEN = 0;
+  78   1        LCDRS=0;      //选择指令寄存器   
+  79   1        P0=com;       //写的指令
+  80   1        LCDdelay(5);
+  81   1        LCDEN=1;      //高电平到低电平启动
+  82   1        LCDdelay(5);
+  83   1        LCDEN=0;
+  84   1      }
+  85          //写数据
+  86          void write_data(uchar date)
+  87          {
+  88   1        LCDRS=1;    //选择数据寄存器
+  89   1        P0=date;    //写入的数据
+  90   1        LCDdelay(5);
+  91   1        LCDEN=1;
+  92   1        LCDdelay(5);
+  93   1        LCDEN=0;
+  94   1      }
+  95          /*1602指令简介
+  96            write_com(0x38);//屏幕初始化，16*2显示，5*7点阵，8位数据
+  97            write_com(0x0c);//打开显示 无光标 无光标闪烁
+  98            write_com(0x0d);//打开显示 阴影闪烁
+  99            write_com(0x0e);//打开显示 显示下划线
+ 100            write_com(0x0f);//打开显示 阴影闪烁,显示下划线
+ 101          */
+ 102          //1602初始化
+ 103          
+ 104          void Init1602()
+ 105          {
+ 106   1        uchar i=0;
+ 107   1        write_com(0x38);//屏幕初始化
+ 108   1        write_com(0x0c);//打开显示 无光标 无光标闪烁
+ 109   1        write_com(0x06);//当读或写一个字符是指针后移一位
+ 110   1        write_com(0x01);//清屏
+ 111   1        write_com(0x80);//设置位置，为00h
+ 112   1        //===============================================================
+ 113   1        for(i=0;i<16;i++)
+ 114   1        {
+ 115   2          write_data(Init1[i]);   //显示数组1的数据
+ 116   2        }
+ 117   1        write_com(0x80+5);//置数据存储器地址
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 3   
+
+ 118   1        write_data(0x25);//显示符号%
+ 119   1        write_com(0x80+10);
+ 120   1        write_data(0x25);//%%显示符号
+ 121   1        write_com(0x80+15);
+ 122   1        write_data(0x25);//%显示符号
+ 123   1        write_com(0x80+0x40);//设置位置
+ 124   1        for(i=0;i<16;i++)
+ 125   1        {
+ 126   2          write_data(Init2[i]);   //显示数组2的数据
+ 127   2        } 
+ 128   1      }
+ 129          
+ 130          void Display_1602(yushe_wendu,yushe_yanwu,yushe_wendu_L,yushe_yanwu_L,c,temp)
+ 131          {
+ 132   1        //设置最高温度值
+ 133   1        write_com(0x80+13);
+ 134   1        write_data(0x30+yushe_wendu/10);  //‘0’+yushe_wendu/10：十位
+ 135   1        write_data(0x30+yushe_wendu%10);  //‘0’+yushe_wendu%10：个位
+ 136   1        //设置最低温度值
+ 137   1        write_com(0x80+8);
+ 138   1        write_data(0x30+yushe_wendu_L/10);
+ 139   1        write_data(0x30+yushe_wendu_L%10);
+ 140   1      
+ 141   1        //设置最高湿度值
+ 142   1        write_com(0x80+0x40+13);
+ 143   1        write_data(0x30+yushe_yanwu%100/10);
+ 144   1        write_data(0x30+yushe_yanwu%10);
+ 145   1        //设置最低湿度值
+ 146   1        write_com(0x80+0x40+8);
+ 147   1        write_data(0x30+yushe_yanwu_L%100/10);
+ 148   1        write_data(0x30+yushe_yanwu_L%10);
+ 149   1        //时时温度
+ 150   1        write_com(0x80+3);
+ 151   1        write_data(0x30+c%100/10);
+ 152   1        write_data(0x30+c%10);
+ 153   1        //时时湿度
+ 154   1        write_com(0x80+0x40+3);
+ 155   1        write_data(0x30+temp%100/10);
+ 156   1        write_data(0x30+temp%10);
+ 157   1      }
+ 158          
+ 159          
+ 160          
+ 161          //按键处理函数
+ 162          void Key()
+ 163          {
+ 164   1        //模式选择
+ 165   1        if(Key1==0)   //设置按键
+ 166   1        {
+ 167   2          while(Key1==0); //按一下key1开始设置
+ 168   2          if(Mode>=5) Mode=0;
+ 169   2          else
+ 170   2          {
+ 171   3            Mode++;     //模式加一
+ 172   3            switch(Mode)  //判断模式的值
+ 173   3            {
+ 174   4              case 1://调温度上限值模式
+ 175   4              {
+ 176   5                write_com(0x80+12);//为1时 温度阀值的位置闪烁
+ 177   5                write_data('-');
+ 178   5                write_com(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+ 179   5                write_data('H');
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 4   
+
+ 180   5                write_com(0x80+7);//为1时 温度阀值的位置闪烁
+ 181   5                write_data('L');
+ 182   5                write_com(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+ 183   5                write_data('L');
+ 184   5                break;        //执行后跳出switch
+ 185   5              }
+ 186   4              case 2://调湿度上限值模式
+ 187   4              {
+ 188   5                write_com(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+ 189   5                write_data('-');
+ 190   5                write_com(0x80+12);//为1时 温度阀值的位置闪烁
+ 191   5                write_data('H');
+ 192   5                write_com(0x80+7);//为1时 温度阀值的位置闪烁
+ 193   5                write_data('L');
+ 194   5                write_com(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+ 195   5                write_data('L');
+ 196   5                break;
+ 197   5              }
+ 198   4              case 3://调温度下限值模式
+ 199   4              {
+ 200   5                write_com(0x80+7);//为1时 温度阀值的位置闪烁
+ 201   5                write_data('-');
+ 202   5                write_com(0x80+12);//为1时 温度阀值的位置闪烁
+ 203   5                write_data('H');
+ 204   5                write_com(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+ 205   5                write_data('H');
+ 206   5                write_com(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+ 207   5                write_data('L');
+ 208   5                break;        //执行后跳出switch
+ 209   5              }
+ 210   4              case 4://调湿度下限值模式
+ 211   4              {
+ 212   5                write_com(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+ 213   5                write_data('-');
+ 214   5                write_com(0x80+12);//为1时 温度阀值的位置闪烁
+ 215   5                write_data('H');
+ 216   5                write_com(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+ 217   5                write_data('H');
+ 218   5                write_com(0x80+7);//为1时 温度阀值的位置闪烁
+ 219   5                write_data('L');
+ 220   5                break;
+ 221   5              }
+ 222   4              case 5:         //当模式加到3时
+ 223   4              {
+ 224   5                write_com(0x38);//屏幕初始化
+ 225   5                write_com(0x0c);//打开显示 无光标 无光标闪烁
+ 226   5                write_com(0x80+12);//为1时 温度阀值的位置闪烁
+ 227   5                write_data('H');
+ 228   5                write_com(0x80+0x40+12);//为2时 湿度阀值的位置闪烁
+ 229   5                write_data('H');
+ 230   5                write_com(0x80+7);//为1时 温度阀值的位置闪烁
+ 231   5                write_data('L');
+ 232   5                write_com(0x80+0x40+7);//为2时 湿度阀值的位置闪烁
+ 233   5                write_data('L');
+ 234   5                Mode=0;     //模式清零
+ 235   5                break;
+ 236   5              }
+ 237   4            }
+ 238   3          }
+ 239   2        }
+ 240   1        if(Key2==0&&Mode!=0)   //加按键只有在模式不等于0时有效
+ 241   1        {
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 5   
+
+ 242   2          while(Key2==0);
+ 243   2          switch(Mode)     //加按键按下时 判断当前模式
+ 244   2          {
+ 245   3            case 1:      //模式为1时
+ 246   3            {
+ 247   4              yushe_wendu++;        //预设温度上限值（阀值）加1
+ 248   4              if(yushe_wendu>=99)       //加到大于等于99时
+ 249   4              yushe_wendu=99;           //固定为99
+ 250   4              write_com(0x80+13);     //选1602上显示的位置
+ 251   4              write_data(0x30+yushe_wendu/10);  //将温度上限值数据分解开送入液晶显示
+ 252   4              write_data(0x30+yushe_wendu%10);
+ 253   4              break;
+ 254   4            }
+ 255   3            case 2:
+ 256   3            {
+ 257   4              yushe_humi++;       //湿度上限值,同温度上限值设置
+ 258   4              if(yushe_humi>=100)
+ 259   4              yushe_humi=100;
+ 260   4              write_com(0x80+0x40+13);
+ 261   4              write_data(0x30+yushe_humi%100/10);
+ 262   4              write_data(0x30+yushe_humi%10);
+ 263   4              break;        
+ 264   4            }
+ 265   3            case 3:      //模式为3时
+ 266   3            {
+ 267   4              yushe_wendu_L++;    //温度下限值,同温度上限值设置
+ 268   4              if(yushe_wendu_L>=95)               
+ 269   4              yushe_wendu_L=95;                   
+ 270   4              write_com(0x80+8);                
+ 271   4              write_data(0x30+yushe_wendu_L/10); 
+ 272   4              write_data(0x30+yushe_wendu_L%10);
+ 273   4              break;
+ 274   4            }
+ 275   3            case 4:
+ 276   3            {
+ 277   4              yushe_humi_L++;   //湿度下限值,同温度上限值设置
+ 278   4              if(yushe_humi_L>=90)                
+ 279   4              yushe_humi_L=90;                    
+ 280   4              write_com(0x80+0x40+8);
+ 281   4              write_data(0x30+yushe_humi_L%100/10);
+ 282   4              write_data(0x30+yushe_humi_L%10);
+ 283   4              break;        
+ 284   4            }
+ 285   3          }
+ 286   2        }
+ 287   1        if(Key3==0&&Mode!=0)
+ 288   1        {
+ 289   2          while(Key3==0);
+ 290   2          switch(Mode)
+ 291   2          {
+ 292   3            case 1:
+ 293   3            {
+ 294   4              if(yushe_wendu<=1)      //当温度上限值减小到1时
+ 295   4              yushe_wendu=1;                        //固定为1
+ 296   4              yushe_wendu--;                    //预设温度值减一
+ 297   4              write_com(0x80+13);           //选1602上显示的位置
+ 298   4              write_data(0x30+yushe_wendu/10);      //将温度上限值数据分解开送入液晶显示
+ 299   4              write_data(0x30+yushe_wendu%10);
+ 300   4              break;
+ 301   4            }
+ 302   3            case 2:
+ 303   3            {
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 6   
+
+ 304   4              if(yushe_humi<=1)     //湿度上限值,同温度上限值设置
+ 305   4              yushe_humi=1;
+ 306   4              yushe_humi--;               
+ 307   4              write_com(0x80+0x40+13);
+ 308   4              write_data(0x30+yushe_humi%100/10);
+ 309   4              write_data(0x30+yushe_humi%10);
+ 310   4              break;        
+ 311   4            }
+ 312   3            case 3:      //模式为3时
+ 313   3            {
+ 314   4              if(yushe_wendu_L<=1)    //温度下限值,同温度上限值设置
+ 315   4              yushe_wendu_L=1;                  
+ 316   4              yushe_wendu_L--;                  
+ 317   4              write_com(0x80+8);                
+ 318   4              write_data(0x30+yushe_wendu_L/10);
+ 319   4              write_data(0x30+yushe_wendu_L%10);
+ 320   4              break;
+ 321   4            }
+ 322   3            case 4:
+ 323   3            {
+ 324   4              if(yushe_humi_L<=1)     //湿度下限值,同温度上限值设置
+ 325   4              yushe_humi_L=1;                   
+ 326   4              yushe_humi_L--;                   
+ 327   4              write_com(0x80+0x40+8);
+ 328   4              write_data(0x30+yushe_humi_L%100/10);
+ 329   4              write_data(0x30+yushe_humi_L%10);
+ 330   4              break;        
+ 331   4            }   }
+ 332   2        }
+ 333   1        delay(10);           //延时去抖动
+ 334   1        write_com(0x38);//屏幕初始化
+ 335   1        write_com(0x0c);//打开显示 无光标 无光标闪烁
+ 336   1      }
+ 337          
+ 338          void Delay1(uint j)
+ 339          {  
+ 340   1        uchar i;
+ 341   1        for(;j>0;j--)
+ 342   1        {   
+ 343   2          for(i=0;i<27;i++);
+ 344   2        }
+ 345   1      }
+ 346          
+ 347          void  Delay_10us(void)
+ 348          {
+ 349   1        uchar i;
+ 350   1        i--;
+ 351   1        i--;
+ 352   1        i--;
+ 353   1        i--;
+ 354   1        i--;
+ 355   1        i--;
+ 356   1      }
+ 357          
+ 358          void  COM(void)
+ 359          {
+ 360   1        uchar i;
+ 361   1        for(i=0;i<8;i++)     
+ 362   1        {
+ 363   2          U8FLAG=2; 
+ 364   2          while((!DHT11_IN)&&U8FLAG++);
+ 365   2          Delay_10us();
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 7   
+
+ 366   2          Delay_10us();
+ 367   2          Delay_10us();
+ 368   2          U8temp=0;
+ 369   2          if(DHT11_IN)U8temp=1;
+ 370   2          U8FLAG=2;
+ 371   2          while((DHT11_IN)&&U8FLAG++);
+ 372   2          //超时则跳出for循环     
+ 373   2          if(U8FLAG==1)break;
+ 374   2          //判断数据位是0还是1   
+ 375   2          // 如果高电平高过预定0高电平值则数据位为 1 
+ 376   2          U8comdata<<=1;
+ 377   2          U8comdata|=U8temp;        //
+ 378   2        }
+ 379   1      }
+ 380          //--------------------------------
+ 381          //-----湿度读取子程序 ------------
+ 382          //--------------------------------
+ 383          //----以下变量均为全局变量--------
+ 384          //----温度高8位== U8T_data_H------
+ 385          //----温度低8位== U8T_data_L------
+ 386          //----湿度高8位== U8HU_data_H-----
+ 387          //----湿度低8位== U8HU_data_L-----
+ 388          //----校验 8位 == U8checkdata-----
+ 389          //----调用相关子程序如下----------
+ 390          //---- Delay();, Delay_10us();,COM(); 
+ 391          //--------------------------------
+ 392          
+ 393          //uchar choice = 1;
+ 394          //sbit DHT11 = P1^4;
+ 395          void ReadHu(/*uchar Cho*/)    
+ 396          {
+ 397   1      /*  if(!Cho)
+ 398   1          DHT11 = DHT11_IN;
+ 399   1        else DHT11 = DHT11_OUT;  */
+ 400   1        //主机拉低18ms 
+ 401   1        DHT11_IN=0;
+ 402   1        Delay1(180);
+ 403   1        ET0 = 0;//关闭定时器0中断
+ 404   1        DHT11_IN=1;
+ 405   1        //总线由上拉电阻拉高 主机延时20us
+ 406   1        Delay_10us();
+ 407   1        Delay_10us();
+ 408   1        Delay_10us();
+ 409   1        Delay_10us();
+ 410   1        //主机设为输入 判断从机响应信号 
+ 411   1        DHT11_IN=1;
+ 412   1        //判断从机是否有低电平响应信号 如不响应则跳出，响应则向下运行   
+ 413   1        if(!DHT11_IN)    //T !    
+ 414   1        {
+ 415   2          U8FLAG=2;
+ 416   2          //判断从机是否发出 80us 的低电平响应信号是否结束   
+ 417   2          while((!DHT11_IN)&&U8FLAG++);
+ 418   2          U8FLAG=2;
+ 419   2          //判断从机是否发出 80us 的高电平，如发出则进入数据接收状态
+ 420   2          while((DHT11_IN)&&U8FLAG++);
+ 421   2          //数据接收状态     
+ 422   2          COM();
+ 423   2          U8HU_data_H_temp=U8comdata;
+ 424   2          COM();
+ 425   2          U8HU_data_L_temp=U8comdata;
+ 426   2          COM();
+ 427   2          U8T_data_H_temp=U8comdata;
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 8   
+
+ 428   2          COM();
+ 429   2          U8T_data_L_temp=U8comdata;
+ 430   2          COM();
+ 431   2          U8checkdata_temp=U8comdata;
+ 432   2          DHT11_IN=1;
+ 433   2          ET0 = 1;//开启定时器0中断
+ 434   2          //数据校验 
+ 435   2      
+ 436   2          U8temp=(U8T_data_H_temp+U8T_data_L_temp+U8HU_data_H_temp+U8HU_data_L_temp);
+ 437   2          if(U8temp==U8checkdata_temp)
+ 438   2          {
+ 439   3            U8HU_data_H=U8HU_data_H_temp;
+ 440   3            U8HU_data_L=U8HU_data_L_temp;
+ 441   3            U8T_data_H=U8T_data_H_temp;
+ 442   3            U8T_data_L=U8T_data_L_temp;
+ 443   3            U8checkdata=U8checkdata_temp;
+ 444   3          }//fi
+ 445   2        }//fi
+ 446   1      
+ 447   1      }
+ 448          
+ 449          //用于处理内外接收到的湿度值；  
+ 450          /*void CompileHu(){
+ 451            ReadHu(DHT11_IN);
+ 452            U8HU_data_H_comp=U8HU_data_H;
+ 453            U8HU_data_L_comp=U8HU_data_L;
+ 454            U8T_data_H_comp=U8T_data_H;
+ 455            U8T_data_L_comp=U8T_data_L;
+ 456            U8checkdata_comp=U8checkdata;
+ 457            ReadHu(DHT11_OUT);
+ 458            U8HU_data_H_comp=U8HU_data_H*0.6+U8HU_data_H_comp*0.4;
+ 459            U8HU_data_L_comp=U8HU_data_L*0.6+U8HU_data_L_comp*0.4;
+ 460            U8T_data_H=U8T_data_H*0.6+U8T_data_H_comp*0.4;
+ 461            U8T_data_L=U8T_data_L*0.6+U8T_data_L_comp*0.4;
+ 462            U8checkdata_comp=U8checkdata;
+ 463          
+ 464          }   */
+ 465          
+ 466          /*****主函数*****/
+ 467          void main()
+ 468          {
+ 469   1        uint i=0;
+ 470   1        Delay_Ms(100);//上电延时100ms,等待DHT11启动
+ 471   1        Init1602();       //调用初始化显示函数
+ 472   1        U8T_data_H=30;
+ 473   1        U8HU_data_H=60;
+ 474   1        while(1)        //进入循环
+ 475   1        {
+ 476   2      
+ 477   2      //    Key();            //调用按键函数  扫描按键
+ 478   2      //    if(Mode==0)     //只有当模式为0时才会执行以下的阀值判断部分
+ 479   2      //    {
+ 480   2      //      if(i<1)
+ 481   2      //      {
+ 482   2      //        i=10;
+ 483   2      //        ReadHu();//温湿度检测受定时器影响,故在驱动程序中关闭定时器中断,减小扫描频率才能更好的实现红外接收
+ 484   2      //      }
+ 485   2      //      i--;
+ 486   2      //      //显示预设温度上限值，预设湿度上限值，预设温度下限值，预设湿度下限值，当前温度值，当前湿度值
+ 487   2            Display_1602(1,2,3,4,5,6);
+ 488   2            
+ 489   2      //      if(U8HU_data_H>=yushe_humi)  //湿度值大于等于预设上限值时
+C51 COMPILER V9.59.0.0   NEW_SHACHUANG                                                     01/15/2019 16:39:33 PAGE 9   
+
+ 490   2      //      {
+ 491   2      //        LED_humi=0;       //湿度上限指示灯亮
+ 492   2      //        //baojing=0;        //蜂鸣器报警
+ 493   2      //      }
+ 494   2      //      else if(U8HU_data_H<=yushe_humi_L)    //湿度值小于等于预设值下限值时
+ 495   2      //      {
+ 496   2      //        LED_humi_L=0;     //湿度下限指示灯亮
+ 497   2      //        //baojing=0;        //蜂鸣器报警
+ 498   2      //      }
+ 499   2      //      else            //湿度值处于上限界限之间时
+ 500   2      //      {
+ 501   2      //        LED_humi=1;       //关掉湿度上限报警灯
+ 502   2      //        LED_humi_L=1;     //关掉湿度下限报警灯
+ 503   2      //      }
+ 504   2      //      if(U8T_data_H>=(yushe_wendu))   //温度值大于等于预设上限值时
+ 505   2      //      {
+ 506   2      //        //baojing=0;        //打开蜂鸣器报警
+ 507   2      //        LED_wendu=0;      //打开温度上限报警灯
+ 508   2      //      }
+ 509   2      //      else if(U8T_data_H<=yushe_wendu_L)    //温度值小于等于预设值下限值时
+ 510   2      //      {
+ 511   2      //        LED_wendu_L=0;      //温度下限指示灯亮
+ 512   2      //        //baojing=0;        //蜂鸣器报警
+ 513   2      //      }
+ 514   2      //      else            //温度值处于上限界限之间时
+ 515   2      //      {
+ 516   2      //        LED_wendu=1;        //关闭温度上限报警灯
+ 517   2      //        LED_wendu_L=1;      //关闭温度下限报警灯
+ 518   2      //      }
+ 519   2      //      if(yushe_humi_L<U8HU_data_H&&U8HU_data_H<yushe_humi&&yushe_wendu_L<U8T_data_H&&U8T_data_H<yushe_wendu
+             -);    //当湿度和温度都处于正常值时      
+ 520   2      //    else
+ 521   2      //    {
+ 522   2      //      ET0 = 1;//开启定时器0中断
+ 523   2      //    }
+ 524   2      //  }
+ 525   2      }
+ 526   1      } 
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1360    ----
+   CONSTANT SIZE    =     34    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     28      15
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

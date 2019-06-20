@@ -1,0 +1,218 @@
+BL51 BANKED LINKER/LOCATER V6.22.2.0                                                    03/25/2019  11:00:13  PAGE 1
+
+
+BL51 BANKED LINKER/LOCATER V6.22.2.0, INVOKED BY:
+D:\KEIL5\C51\BIN\BL51.EXE STARTUP.obj, shachuang.obj TO shachuang RAMSIZE (256)
+
+
+MEMORY MODEL: SMALL
+
+
+INPUT MODULES INCLUDED:
+  STARTUP.obj (?C_STARTUP)
+  shachuang.obj (SHACHUANG)
+  D:\KEIL5\C51\LIB\C51S.LIB (?C_INIT)
+  D:\KEIL5\C51\LIB\C51S.LIB (?C?CLDPTR)
+
+
+LINK MAP OF MODULE:  shachuang (?C_STARTUP)
+
+
+            TYPE    BASE      LENGTH    RELOCATION   SEGMENT NAME
+            -----------------------------------------------------
+
+            * * * * * * *   D A T A   M E M O R Y   * * * * * * *
+            REG     0000H     0008H     ABSOLUTE     "REG BANK 0"
+            DATA    0008H     000DH     UNIT         ?DT?SHACHUANG
+            IDATA   0015H     0001H     UNIT         ?STACK
+
+            * * * * * * *   C O D E   M E M O R Y   * * * * * * *
+            CODE    0000H     0003H     ABSOLUTE     
+                    0003H     07FDH                  *** GAP ***
+            CODE    0800H     008CH     UNIT         ?C_C51STARTUP
+            CODE    088CH     003DH     UNIT         ?PR?MAIN?SHACHUANG
+            CODE    08C9H     001EH     UNIT         ?PR?_DELAY?SHACHUANG
+            CODE    08E7H     0019H     UNIT         ?C?LIB_CODE
+            CODE    0900H     0016H     UNIT         ?C_INITSEG
+            CODE    0916H     0013H     UNIT         ?PR?_SENDALL?SHACHUANG
+            CODE    0929H     000BH     UNIT         ?PR?UART_INIT?SHACHUANG
+            CODE    0934H     000AH     UNIT         ?PR?_SENDCHAR?SHACHUANG
+
+
+
+OVERLAY MAP OF MODULE:   shachuang (?C_STARTUP)
+
+
+SEGMENT
+  +--> CALLED SEGMENT
+---------------------
+?C_C51STARTUP
+  +--> ?PR?MAIN?SHACHUANG
+  +--> ?C_INITSEG
+
+?PR?MAIN?SHACHUANG
+  +--> ?PR?UART_INIT?SHACHUANG
+  +--> ?PR?_DELAY?SHACHUANG
+  +--> ?PR?_SENDALL?SHACHUANG
+
+?PR?_SENDALL?SHACHUANG
+  +--> ?PR?_SENDCHAR?SHACHUANG
+
+
+BL51 BANKED LINKER/LOCATER V6.22.2.0                                                  03/25/2019  11:00:13  PAGE 2
+
+
+
+SYMBOL TABLE OF MODULE:  shachuang (?C_STARTUP)
+
+  VALUE           TYPE          NAME
+  ----------------------------------
+
+  -------         MODULE        ?C_STARTUP
+  C:0800H         SEGMENT       ?C_C51STARTUP
+  I:0015H         SEGMENT       ?STACK
+  C:0000H         PUBLIC        ?C_STARTUP
+  D:00E0H         SYMBOL        ACC
+  D:00F0H         SYMBOL        B
+  D:0083H         SYMBOL        DPH
+  D:0082H         SYMBOL        DPL
+  N:0000H         SYMBOL        IBPSTACK
+  N:0100H         SYMBOL        IBPSTACKTOP
+  N:0080H         SYMBOL        IDATALEN
+  C:0803H         SYMBOL        IDATALOOP
+  N:0000H         SYMBOL        PBPSTACK
+  N:0100H         SYMBOL        PBPSTACKTOP
+  N:0000H         SYMBOL        PDATALEN
+  N:0000H         SYMBOL        PDATASTART
+  N:0000H         SYMBOL        PPAGE
+  N:0000H         SYMBOL        PPAGEENABLE
+  D:00A0H         SYMBOL        PPAGE_SFR
+  D:0081H         SYMBOL        SP
+  C:0800H         SYMBOL        STARTUP1
+  N:0000H         SYMBOL        XBPSTACK
+  N:0000H         SYMBOL        XBPSTACKTOP
+  N:0000H         SYMBOL        XDATALEN
+  N:0000H         SYMBOL        XDATASTART
+  C:0000H         LINE#         126
+  C:0800H         LINE#         133
+  C:0802H         LINE#         134
+  C:0803H         LINE#         135
+  C:0804H         LINE#         136
+  C:0806H         LINE#         185
+  C:0809H         LINE#         196
+  -------         ENDMOD        ?C_STARTUP
+
+  -------         MODULE        SHACHUANG
+  C:0000H         SYMBOL        _ICE_DUMMY_
+  D:0090H         PUBLIC        P1
+  D:00A0H         PUBLIC        P2
+  D:00B0H         PUBLIC        P3
+  B:00A8H.7       PUBLIC        EA
+  D:00A8H         PUBLIC        IE
+  C:08C9H         PUBLIC        _delay
+  D:0008H         PUBLIC        c1
+  D:000EH         PUBLIC        c2
+  B:00A8H.4       PUBLIC        ES
+  D:00B8H         PUBLIC        IP
+  D:0013H         PUBLIC        receFlag
+  B:00B0H.5       PUBLIC        s1
+  B:00B0H.4       PUBLIC        s2
+  C:088CH         PUBLIC        main
+  D:0014H         PUBLIC        sendFlag
+BL51 BANKED LINKER/LOCATER V6.22.2.0                                                  03/25/2019  11:00:13  PAGE 3
+
+
+  C:0934H         PUBLIC        _sendChar
+  D:0099H         PUBLIC        SBUF
+  D:0098H         PUBLIC        SCON
+  D:0088H         PUBLIC        TCON
+  C:0916H         PUBLIC        _sendAll
+  B:0098H.7       PUBLIC        SM0
+  B:0098H.6       PUBLIC        SM1
+  C:0929H         PUBLIC        UART_init
+  B:0098H.4       PUBLIC        REN
+  D:00C8H         PUBLIC        T2CON
+  D:00D0H         PUBLIC        PSW
+  -------         PROC          _DELAY
+  D:0006H         SYMBOL        z
+  -------         DO            
+  D:0006H         SYMBOL        x
+  D:0004H         SYMBOL        y
+  -------         ENDDO         
+  C:08C9H         LINE#         21
+  C:08C9H         LINE#         22
+  C:08C9H         LINE#         24
+  C:08D2H         LINE#         25
+  C:08E6H         LINE#         26
+  -------         ENDPROC       _DELAY
+  -------         PROC          UART_INIT
+  C:0929H         LINE#         27
+  C:0929H         LINE#         28
+  C:0929H         LINE#         33
+  C:092BH         LINE#         34
+  C:092DH         LINE#         35
+  C:092FH         LINE#         36
+  C:0931H         LINE#         37
+  C:0933H         LINE#         38
+  -------         ENDPROC       UART_INIT
+  -------         PROC          _SENDCHAR
+  D:0007H         SYMBOL        Value
+  C:0934H         LINE#         40
+  C:0934H         LINE#         41
+  C:0934H         LINE#         42
+  C:0936H         LINE#         43
+  C:0939H         LINE#         44
+  C:093DH         LINE#         45
+  -------         ENDPROC       _SENDCHAR
+  -------         PROC          _SENDALL
+  D:0001H         SYMBOL        pValue
+  C:0916H         LINE#         47
+  C:0916H         LINE#         48
+  C:0916H         LINE#         49
+  C:091CH         LINE#         50
+  C:091CH         LINE#         51
+  C:091FH         LINE#         52
+  C:0926H         LINE#         53
+  C:0928H         LINE#         54
+  -------         ENDPROC       _SENDALL
+  -------         PROC          MAIN
+  C:088CH         LINE#         56
+  C:088CH         LINE#         57
+  C:088CH         LINE#         58
+BL51 BANKED LINKER/LOCATER V6.22.2.0                                                  03/25/2019  11:00:13  PAGE 4
+
+
+  C:088FH         LINE#         59
+  C:088FH         LINE#         60
+  C:088FH         LINE#         61
+  C:0892H         LINE#         62
+  C:0892H         LINE#         63
+  C:0899H         LINE#         64
+  C:089CH         LINE#         65
+  C:089CH         LINE#         66
+  C:08A5H         LINE#         67
+  C:08A8H         LINE#         68
+  C:08A8H         LINE#         69
+  C:08ABH         LINE#         70
+  C:08ABH         LINE#         72
+  C:08AEH         LINE#         73
+  C:08AEH         LINE#         74
+  C:08B5H         LINE#         75
+  C:08B8H         LINE#         76
+  C:08B8H         LINE#         77
+  C:08C1H         LINE#         78
+  C:08C4H         LINE#         79
+  C:08C4H         LINE#         80
+  -------         ENDPROC       MAIN
+  -------         ENDMOD        SHACHUANG
+
+  -------         MODULE        ?C?CLDPTR
+  C:08E7H         PUBLIC        ?C?CLDPTR
+  -------         ENDMOD        ?C?CLDPTR
+
+******************************************************************************
+* RESTRICTED VERSION WITH 0800H BYTE CODE SIZE LIMIT; USED: 00A7H BYTE ( 8%) *
+******************************************************************************
+
+Program Size: data=22.0 xdata=0 code=321
+LINK/LOCATE RUN COMPLETE.  0 WARNING(S),  0 ERROR(S)

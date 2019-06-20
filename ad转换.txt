@@ -1,0 +1,308 @@
+#include <reg52.h>
+#include <stdio.h>
+#include <intrins.h>
+#define MAIN_Fosc		11059200UL	//宏定义主时钟HZ
+#define PCF8591_ADDR	0x90		//PCF8591地址
+
+/*====================================
+ 自定义类型名
+====================================*/
+typedef unsigned char INT8U;
+typedef unsigned char uchar;
+
+typedef unsigned int INT16U;
+typedef unsigned int uint;
+
+uchar AD_Value;	//存储AD转换回的数字量
+
+/*====================================
+ 硬件接口位声明
+====================================*/
+sbit SDA = P2^6;   //I2C串行数据
+sbit SCL = P2^7;   //I2C串行时钟
+sbit LED1= P1^0;   //读取AD的值是否成功（亮成功，灭失败）
+sbit LED2= P1^1;   //DAC成功输出（亮成功，灭失败）
+sbit BEEP= P2^3;   //蜂鸣器引脚定义
+
+sbit p20 = P2^0;
+sbit p21 = P2^1;
+sbit p22 = P2^2;
+sbit p23 = P2^3;
+
+uchar code table[]={
+0xc0,0xf9,0xa4,0xb0,
+0x99,0x92,0x82,0xf8,
+0x80,0x90,0x88,0x83,
+0xc6,0xa1,0x86,0x8e};
+
+/*====================================
+函数：void Delay_Ms(INT16U ms)
+参数：ms，毫秒延时形参
+描述：12T 51单片机自适应主时钟毫秒级延时函数
+====================================*/
+void Delay_Ms(INT16U ms)
+{
+     INT16U i;
+	 do{
+	      i = MAIN_Fosc / 96000; 
+		  while(--i);   //96T per loop
+     }while(--ms);
+}
+
+/*====================================
+函数：void Display(INT8U Value)
+参数：Value,显示值 取值0-255
+描述：共阴极数码管显示函数可显示一个字节的数
+====================================*/
+void Display(INT8U Value)
+{
+//------------------------------
+	p20 = 0;
+	P0 = table[Value/100];	//管显示百位
+	Delay_Ms(5);
+	p20 = 1;
+	P0 = 0xff;			 	 //清除断码
+
+	//Delay_Ms(5);
+//-------------------------------
+	p21 = 0;
+	P0 = table[Value%100/10]; //显示十位
+	Delay_Ms(5);
+	p21 = 1;
+	P0 = 0xff;				  //清除断码
+
+	//Delay_Ms(5);
+//-------------------------------
+	p22 = 0;
+	P0 = table[Value%10];		//显示个位
+	Delay_Ms(5);
+	p22 = 1;							
+	P0 = 0xff;					//清除断码
+
+	//Delay_Ms(5);
+}
+
+
+
+/*====================================
+函数：void Delay5us()
+描述：12T 51单片机5微秒延时函数自适应时钟（11.0592M，12M,22.1184M）
+====================================*/
+void Delay5us()
+{
+	#if MAIN_Fosc == 11059200
+		_nop_();
+	#elif MAIN_Fosc == 12000000
+		_nop_();
+	#elif MAIN_Fosc == 22118400
+		_nop_(); _nop_(); _nop_();
+	#endif
+}
+/*====================================
+函数：I2C_init()
+描述：I2C总线初始化
+====================================*/
+void I2C_init()
+{
+	SDA = 1;   //数据总线高
+	_nop_();
+	SCL = 1;   //时钟总线高
+	_nop_();
+}
+
+/*====================================
+函数：I2C_Start()
+描述：I2C起始信号
+====================================*/
+void I2C_Start()  
+{
+	SCL = 1;
+	_nop_();
+	SDA = 1;
+	Delay5us();
+	SDA = 0;
+	Delay5us();
+}
+
+/*====================================
+函数：I2C_Stop()
+描述：I2C停止信号
+====================================*/
+void I2C_Stop()
+{
+	SDA = 0;
+	_nop_();
+	SCL = 1;
+	Delay5us();
+	SDA = 1;
+	Delay5us();
+}
+
+/*====================================
+函数：Master_ACK(bit i)
+参数：i 为0时发送非应答 为1时发送应答
+描述：I2C主机发送应答
+====================================*/
+void Master_ACK(bit i)	
+{
+	SCL = 0; // 拉低时钟总线允许SDA数据总线上的数据变化
+	_nop_(); // 让总线稳定
+	if (i)	 //如果i = 1 那么拉低数据总线 表示主机应答
+	{
+		SDA = 0;
+	}
+	else	 
+	{
+		SDA = 1;	 //发送非应答
+	}
+	_nop_();//让总线稳定
+	SCL = 1;//拉高时钟总线 让从机从SDA线上读走 主机的应答信号
+	_nop_();
+	SCL = 0;//拉低时钟总线， 占用总线继续通信
+	_nop_();
+	SDA = 1;//释放SDA数据总线。
+	_nop_();
+}
+
+/*====================================
+函数：Test_ACK()
+返回：0为非应答 1为应答
+描述：I2C检测从机应答
+====================================*/
+bit Test_ACK()	 // 检测从机应答
+{
+	SCL = 1;//时钟总线为高电平期间可以读取从机应答信号
+	Delay5us();
+	if (SDA)
+	{
+		SCL = 0;
+		I2C_Stop();
+		return(0);
+	}
+	else
+	{
+		SCL = 0;
+		return(1);
+	}
+}
+
+/*====================================
+函数：I2C_send_byte(uchar byte)
+参数：byte 要发送的字节
+描述：I2C发送一个字节
+====================================*/
+void I2C_send_byte(uchar byte)
+{
+	uchar i;
+	for(i = 0 ; i < 8 ; i++)
+	{
+		SCL = 0;
+		_nop_();
+		if (byte & 0x80)	//
+		{
+			SDA = 1;
+			_nop_();
+		}
+		else
+		{
+			SDA = 0;
+			_nop_();
+		}
+		SCL = 1;
+		_nop_();
+		byte <<= 1;
+	}
+	SCL = 0;
+	_nop_();
+	SDA = 1;
+	_nop_();	
+}
+
+/*====================================
+函数：I2C_read_byte()
+返回：读取的字节
+描述：I2C读一个字节
+====================================*/
+uchar I2C_read_byte()
+{
+	uchar i, dat;
+	SCL = 0 ;
+	_nop_();
+	SDA = 1;
+	_nop_();
+	for(i = 0 ; i < 8 ; i++)
+	{
+		SCL = 1;
+		_nop_();
+		dat <<= 1;	  
+		if (SDA)
+		{
+			dat |= 0x01;  
+		}
+		_nop_();
+		SCL = 0;
+		_nop_();
+	}
+	return(dat);
+}
+
+///*DAC输出*/
+//bit DAC_OUT(uchar DAT)
+//{
+//	I2C_Start();
+//	I2C_send_byte(PCF8591_ADDR+0);
+//	if (!Test_ACK())
+//	{
+//		return(0);
+//	}
+//	I2C_send_byte(DACOUT_EN);	//DA输出使能 
+//	if (!Test_ACK())
+//	{
+//		return(0);
+//	}
+//	I2C_send_byte(DAT);
+//	if (!Test_ACK())
+//	{
+//		return(0);
+//	}
+//	I2C_Stop();
+//	return(1);	
+//}
+
+/*读AD数据*/
+bit ADC_Read(uchar CON)
+{
+	I2C_Start();
+	I2C_send_byte(PCF8591_ADDR+0);
+	if (!Test_ACK())
+	{
+		return(0);
+	}
+	I2C_send_byte(CON);
+	Master_ACK(0);
+	I2C_Start();
+	I2C_send_byte(PCF8591_ADDR+1);
+	if (!Test_ACK())
+	{
+		return(0);
+	}
+	AD_Value = I2C_read_byte();
+	Master_ACK(0);
+	I2C_Stop();
+	return(1);	
+}
+
+void main()
+{
+	I2C_init();
+	while(1)
+	{		
+		//单端输入，读出通道2的值
+		if (ADC_Read(0x03))	LED1 = 0;	else	LED1 = 1;	
+//		if (DAC_OUT(AD_Value))	LED2 = 0;	else	LED2 = 1;
+		Display(AD_Value);
+//		if (AD_Value > 150)	BEEP = 0;	else	BEEP = 1;
+//		Display(128);
+		Delay_Ms(5);
+	}	
+}

@@ -1,0 +1,4 @@
+"STARTUP.obj",
+"shachuang.obj" 
+TO "shachuang" 
+RAMSIZE(256) 
